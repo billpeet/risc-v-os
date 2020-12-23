@@ -1,6 +1,8 @@
 #![no_std]
 #![feature(panic_info_message,asm,alloc_error_handler)]
 
+extern crate alloc;
+
 // ///////////////////////////////////
 // / RUST MACROS
 // ///////////////////////////////////
@@ -108,3 +110,5 @@ pub mod page;
 pub mod shell;
 pub mod mmu;
 pub mod kmem;
+pub mod trap;
+pub mod cpu;
