@@ -1,3 +1,4 @@
+#![no_main]
 #![no_std]
 #![feature(panic_info_message,asm,alloc_error_handler)]
 
@@ -85,6 +86,12 @@ fn kinit() {
     page::init();
     kmem::init();
     mmu::map_kernel();
+}
+
+#[no_mangle]
+extern "C"
+fn kinit_hart(_hartid: usize) {
+
 }
 
 // Entry point, in supervisor mode
