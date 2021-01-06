@@ -1,6 +1,8 @@
 #![no_main]
 #![no_std]
-#![feature(panic_info_message,asm,alloc_error_handler)]
+#![feature(panic_info_message,global_asm,asm,llvm_asm,alloc_error_handler,custom_test_frameworks,alloc_prelude)]
+#![test_runner(crate::test_runner)]
+#![reexport_test_harness_main = "test_main"]
 
 extern crate alloc;
 
@@ -73,7 +75,7 @@ extern "C"
 fn abort() -> ! {
     loop {
         unsafe {
-            asm!("wfi"::::"volatile");
+            asm!("wfi");
         }
     }
 }
@@ -90,8 +92,26 @@ fn kinit() {
 
 #[no_mangle]
 extern "C"
-fn kinit_hart(_hartid: usize) {
-
+fn kinit_hart(hartid: usize) {
+	// All non-0 harts initialize here.
+	unsafe {
+		// We have to store the kernel's table. The tables will be moved
+		// back and forth between the kernel's table and user
+		// applicatons' tables.
+		cpu::mscratch_write(
+            (&mut cpu::KERNEL_TRAP_FRAME[hartid]
+                as *mut cpu::TrapFrame)
+            as usize,
+		);
+		// Copy the same mscratch over to the supervisor version of the
+		// same register.
+		cpu::sscratch_write(cpu::mscratch_read());
+		cpu::KERNEL_TRAP_FRAME[hartid].hartid = hartid;
+		// We can't do the following until zalloc() is locked, but we
+		// don't have locks, yet :( cpu::KERNEL_TRAP_FRAME[hartid].satp
+		// = cpu::KERNEL_TRAP_FRAME[0].satp;
+		// cpu::KERNEL_TRAP_FRAME[hartid].trap_stack = page::zalloc(1);
+	}
 }
 
 // Entry point, in supervisor mode
@@ -103,6 +123,24 @@ fn kmain() {
     //kmem::kmem_tests();
     kmem::global_alloc_tests();
 
+    // Test runner
+    #[cfg(test)]
+    test_main();
+
+    unsafe {
+        // Set the next machine timer to fire.
+        let mtimecmp = 0x0200_4000 as *mut u64;
+        let mtime = 0x0200_bff8 as *const u64;
+        // The frequency given by QEMU is 10_000_000 Hz, so this sets
+        // the next interrupt to fire one second from now.
+        mtimecmp.write_volatile(mtime.read_volatile() + 10_000_000);
+    
+        // Let's cause a page fault and see what happens. This should trap
+        // to m_trap under trap.rs
+        let v = 0x0 as *mut u64;
+        // v.write_volatile(0);
+    }
+    
     // Shell
     let mut my_shell = shell::Shell::new();
     my_shell.shell();
@@ -112,6 +150,7 @@ fn kmain() {
 // / RUST MODULES
 // ///////////////////////////////////
 
+pub mod assembly;
 pub mod uart;
 pub mod page;
 pub mod shell;
@@ -119,3 +158,21 @@ pub mod mmu;
 pub mod kmem;
 pub mod trap;
 pub mod cpu;
+
+// ///////////////////////////////////
+// / TESTS
+// ///////////////////////////////////
+#[cfg(test)]
+fn test_runner(tests: &[&dyn Fn()]) {
+    println!("Running {} tests", tests.len());
+    for test in tests {
+        test();
+    }
+}
+
+#[test_case]
+fn some_test() {
+    println!("some test...");
+    assert_eq!(1, 1);
+    println!("[ok]");
+}

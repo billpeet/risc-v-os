@@ -1,6 +1,7 @@
 use crate::{TEXT_START, TEXT_END, RODATA_START, RODATA_END, DATA_START, DATA_END, BSS_START, BSS_END, KERNEL_STACK_START, KERNEL_STACK_END, HEAP_START, HEAP_SIZE};
 use crate::page::{zalloc, dealloc, align_val, PAGE_SIZE};
 use crate::kmem::{get_page_table, get_head, get_num_allocations};
+use crate::cpu;
 
 #[repr(u64)]
 #[derive(Copy, Clone)]
@@ -205,7 +206,7 @@ pub fn map_kernel() {
         println!("STACK:  0x{:x} -> 0x{:x}", KERNEL_STACK_START, KERNEL_STACK_END);
         println!("HEAP:   0x{:x} -> 0x{:x}", kheap_head, kheap_head + total_pages * 4096);
     }
-
+    
     // Map kernel heap
     id_map_range(&mut root_pt, kheap_head, kheap_head + total_pages * 4096, EntryBits::ReadWrite.val());
 
@@ -231,12 +232,73 @@ pub fn map_kernel() {
     }
 
     // Identity map UART
-    map(&mut root_pt, 0x1000_0000, 0x1000_0000, EntryBits::ReadWrite.val(), 0);
+    id_map_range(&mut root_pt, 0x1000_0000, 0x1000_0100, EntryBits::ReadWrite.val());
 
-    // Write root page table to satp register
-    let root_ppn = root_u >> 12;
-    let satp_val = 8 << 60 | root_ppn;
-    unsafe {
-        asm!("csrw satp, $0" :: "r"(satp_val));
+    // Identity map CLINT
+    id_map_range(&mut root_pt, 0x0200_0000, 0x0200_ffff, EntryBits::ReadWrite.val());
+
+    // Identity map PLIC
+    id_map_range(&mut root_pt, 0x0c00_0000, 0x0c00_2000, EntryBits::ReadWrite.val());
+    id_map_range(&mut root_pt, 0x0c20_0000, 0x0c20_8000, EntryBits::ReadWrite.val());
+
+	// When we return from here, we'll go back to boot.S and switch into
+	// supervisor mode We will return the SATP register to be written when
+	// we return. root_u is the root page table's address. When stored into
+	// the SATP register, this is divided by 4 KiB (right shift by 12 bits).
+	// We enable the MMU by setting mode 8. Bits 63, 62, 61, 60 determine
+	// the mode.
+	// 0 = Bare (no translation)
+	// 8 = Sv39
+	// 9 = Sv48
+	// build_satp has these parameters: mode, asid, page table address.
+	let satp_value = cpu::build_satp(cpu::SatpMode::Sv39, 0, root_u);
+	unsafe {
+		// We have to store the kernel's table. The tables will be moved
+		// back and forth between the kernel's table and user
+		// applicatons' tables. Note that we're writing the physical address
+		// of the trap frame.
+		cpu::mscratch_write(
+            (&mut cpu::KERNEL_TRAP_FRAME[0]
+                as *mut cpu::TrapFrame)
+            as usize,
+		);
+		cpu::sscratch_write(cpu::mscratch_read());
+		cpu::KERNEL_TRAP_FRAME[0].satp = satp_value;
+		// Move the stack pointer to the very bottom. The stack is
+		// actually in a non-mapped page. The stack is decrement-before
+		// push and increment after pop. Therefore, the stack will be
+		// allocated (decremented) before it is stored.
+		cpu::KERNEL_TRAP_FRAME[0].trap_stack =
+			zalloc(1).add(PAGE_SIZE);
+		id_map_range(
+		             &mut root_pt,
+		             cpu::KERNEL_TRAP_FRAME[0].trap_stack
+		                                      .sub(PAGE_SIZE,)
+		             as usize,
+		             cpu::KERNEL_TRAP_FRAME[0].trap_stack as usize,
+		             EntryBits::ReadWrite.val(),
+		);
+		// The trap frame itself is stored in the mscratch register.
+		id_map_range(
+		             &mut root_pt,
+		             cpu::mscratch_read(),
+		             cpu::mscratch_read()
+		             + core::mem::size_of::<cpu::TrapFrame,>(),
+		             EntryBits::ReadWrite.val(),
+		);
+		// print_page_allocations();
+		let p = cpu::KERNEL_TRAP_FRAME[0].trap_stack as usize - 1;
+		let m = virt_to_phys(&root_pt, p).unwrap_or(0);
+		println!("Walk 0x{:x} = 0x{:x}", p, m);
     }
+    
+	// The following shows how we're going to walk to translate a virtual
+	// address into a physical address. We will use this whenever a user
+	// space application requires services. Since the user space application
+	// only knows virtual addresses, we have to translate silently behind
+	// the scenes.
+	println!("Setting 0x{:x}", satp_value);
+	println!("Scratch reg = 0x{:x}", cpu::mscratch_read());
+	cpu::satp_write(satp_value);
+	cpu::satp_fence_asid(0);
 }

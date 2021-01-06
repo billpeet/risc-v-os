@@ -49,7 +49,7 @@ _start:
     csrw    mepc, t1
     li      t2, (1 << 1) | (1 << 5) | (1 << 9)      # set machine interrupt delegate (mideleg) register - software, timer and external interrupts delegated to supervisor mode
     csrw    mie, t2                                 # set machine interrupt enable (sie) register - enable software, timer and external interrupts in supervisor mode
-    sret                                            # sret will put us in supervisor mode and re-enable interrupts
+    mret                                            # use mret so mstatus gets set
 
 3:
 	# Parked harts go here. We need to set these

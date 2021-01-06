@@ -80,7 +80,7 @@ impl Shell {
             "pagefault" => {
                 println!("triggering page fault:");
                 unsafe {
-                    let v = 0x0 as *mut u64;
+                    let v = 0xdeadbeef as *mut u64;
                     v.write_volatile(0);
                 }
                 println!("I'm baaack");
