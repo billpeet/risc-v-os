@@ -39,16 +39,11 @@ _start:
 
 2:
     # Will return here after kinit is complete
-    li      t0, (0b01 << 11) | (1 << 7) | (1 << 5)  # set mstatus register - bit 8 for previous protection mode, bit 5 for previous interrut-enable
+    li      t0, (0b00 << 11) | (1 << 7) | (1 << 5)  # set mstatus register - bit 7 for previous protection mode, bit 5 for previous interrupt-enable
     csrw    mstatus, t0
     la      t2, m_trap_vector                       # set machine trap vector (mtvec)
     csrw    mtvec, t2
-    # la      t3, asm_trap_vector                   # set supervisor trap vector (stvec)
-    # csrw    stvec, t3
-    la      t1, kmain                               # supervisor mode Rust entry point
-    csrw    mepc, t1
-    li      t2, (1 << 1) | (1 << 5) | (1 << 9)      # set machine interrupt delegate (mideleg) register - software, timer and external interrupts delegated to supervisor mode
-    csrw    mie, t2                                 # set machine interrupt enable (sie) register - enable software, timer and external interrupts in supervisor mode
+	la		ra, 4f
     mret                                            # use mret so mstatus gets set
 
 3:

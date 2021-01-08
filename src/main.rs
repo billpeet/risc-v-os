@@ -47,6 +47,10 @@ extern "C" {
     pub static KERNEL_STACK_END: usize;
 }
 
+extern "C" {
+    fn switch_to_user(frame: usize, epc: usize, satp: usize) -> !;
+}
+
 // ///////////////////////////////////
 // / LANGUAGE STRUCTURES / FUNCTIONS
 // ///////////////////////////////////
@@ -83,11 +87,79 @@ fn abort() -> ! {
 // Runs in machine mode
 #[no_mangle]
 extern "C"
-fn kinit() {
+fn kinit() -> ! {
     uart::Uart::new(0x1000_0000).init();
+    println!("Welcome to PeetOS");
     page::init();
     kmem::init();
-    mmu::map_kernel();
+    process::init();
+    println!("Setting up interrupts and PLIC...");
+    plic::set_threshold(0);
+    // Enable PLIC interrupts
+    // VIRTIO = 1 -> 8
+    // UART0 = 10
+    for i in 1..=10 {
+        plic::enable(i);
+        plic::set_priority(i, 1);
+    }
+    virtio::probe();
+
+    println!("testing block driver");
+    let buffer = kmem::kmalloc(1024);
+    unsafe { buffer.write_volatile(1) }
+    block::read(3, buffer, 512, 1024);
+    let mut i = 0;
+    loop {
+        if i > 100_000_000 {
+            break;
+        }
+        i += 1;
+    }
+    unsafe {
+		print!("  ");
+		for i in 0..16 {
+			print!("{:02x} ", buffer.add(i).read());
+		}
+		println!();
+		print!("  ");
+		for i in 0..16 {
+			print!("{:02x} ", buffer.add(16+i).read());
+		}
+		println!();
+		print!("  ");
+		for i in 0..16 {
+			print!("{:02x} ", buffer.add(32+i).read());
+		}
+		println!();
+		print!("  ");
+		for i in 0..16 {
+			print!("{:02x} ", buffer.add(48+i).read());
+		}
+		println!();
+		buffer.add(0).write(0xaa);
+		buffer.add(1).write(0xbb);
+		buffer.add(2).write(0x7a);
+    }
+    block::write(3, buffer, 512, 0);
+    kmem::kfree(buffer);
+
+    // let mut sh = shell::Shell::new();
+    // sh.shell();
+
+    // Start timer
+    unsafe {
+        let mtimecmp = 0x0200_4000 as *mut u64;
+        let mtime = 0x0200_bff8 as *const u64;
+        // The frequency given by QEMU is 10_000_000 Hz, so this sets
+        // the next interrupt to fire one second from now.
+        mtimecmp.write_volatile(mtime.read_volatile() + 10_000_000);
+    }
+
+    // Schedule first process and switch
+    let (frame, mepc, satp) = scheduler::schedule();
+    unsafe {
+        switch_to_user(frame, mepc, satp);
+    }
 }
 
 #[no_mangle]
@@ -114,38 +186,6 @@ fn kinit_hart(hartid: usize) {
 	}
 }
 
-// Entry point, in supervisor mode
-#[no_mangle]
-extern "C"
-fn kmain() {
-    println!("Welcome to PeetOS");
-    //page::paging_tests();
-    //kmem::kmem_tests();
-    kmem::global_alloc_tests();
-
-    // Test runner
-    #[cfg(test)]
-    test_main();
-
-    unsafe {
-        // Set the next machine timer to fire.
-        let mtimecmp = 0x0200_4000 as *mut u64;
-        let mtime = 0x0200_bff8 as *const u64;
-        // The frequency given by QEMU is 10_000_000 Hz, so this sets
-        // the next interrupt to fire one second from now.
-        mtimecmp.write_volatile(mtime.read_volatile() + 10_000_000);
-    
-        // Let's cause a page fault and see what happens. This should trap
-        // to m_trap under trap.rs
-        let v = 0x0 as *mut u64;
-        // v.write_volatile(0);
-    }
-    
-    // Shell
-    let mut my_shell = shell::Shell::new();
-    my_shell.shell();
-}
-
 // ///////////////////////////////////
 // / RUST MODULES
 // ///////////////////////////////////
@@ -158,6 +198,13 @@ pub mod mmu;
 pub mod kmem;
 pub mod trap;
 pub mod cpu;
+pub mod plic;
+pub mod process;
+pub mod syscall;
+pub mod scheduler;
+pub mod virtio;
+pub mod block;
+pub mod random;
 
 // ///////////////////////////////////
 // / TESTS

@@ -238,8 +238,8 @@ pub fn map_kernel() {
     id_map_range(&mut root_pt, 0x0200_0000, 0x0200_ffff, EntryBits::ReadWrite.val());
 
     // Identity map PLIC
-    id_map_range(&mut root_pt, 0x0c00_0000, 0x0c00_2000, EntryBits::ReadWrite.val());
-    id_map_range(&mut root_pt, 0x0c20_0000, 0x0c20_8000, EntryBits::ReadWrite.val());
+    id_map_range(&mut root_pt, 0x0c00_0000, 0x0c00_2001, EntryBits::ReadWrite.val());
+    id_map_range(&mut root_pt, 0x0c20_0000, 0x0c20_8001, EntryBits::ReadWrite.val());
 
 	// When we return from here, we'll go back to boot.S and switch into
 	// supervisor mode We will return the SATP register to be written when

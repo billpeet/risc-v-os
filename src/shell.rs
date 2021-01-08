@@ -5,6 +5,7 @@ use alloc::string::String;
 pub struct Shell {
     uart: Uart,
     cmd: String,
+    running: bool,
 }
 
 impl Shell {
@@ -13,12 +14,13 @@ impl Shell {
         Shell {
             uart: Uart::new(0x1000_0000),
             cmd: String::new(),
+            running: true,
         }
     }
 
     pub fn shell(&mut self) {
         print!("> ");
-        loop {
+        while self.running {
             if let Some(c) = self.uart.get() {
                 match c {
                     8 => {
@@ -94,6 +96,10 @@ impl Shell {
                     // the next interrupt to fire one second from now.
                     mtimecmp.write_volatile(mtime.read_volatile() + 10_000_000);
                 }
+            },
+            "quit" => {
+                println!("quitting shell...");
+                self.running = false;
             },
             _ => {
                 println!("Unrecognized command '{}'", self.cmd.as_str());

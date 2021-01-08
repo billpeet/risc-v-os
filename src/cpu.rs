@@ -19,11 +19,13 @@ pub struct TrapFrame {
 
 impl TrapFrame {
 	pub const fn zero() -> Self {
-		TrapFrame { regs:       [0; 32],
-		            fregs:      [0; 32],
-		            satp:       0,
-		            trap_stack: null_mut(),
-		             hartid:     0, }
+		TrapFrame { 
+			regs:       [0; 32],
+			fregs:      [0; 32],
+			satp:       0,
+			trap_stack: null_mut(),
+			hartid:     0, 
+		}
 	}
 }
 
