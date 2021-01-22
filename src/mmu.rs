@@ -268,16 +268,16 @@ pub fn map_kernel() {
 		// actually in a non-mapped page. The stack is decrement-before
 		// push and increment after pop. Therefore, the stack will be
 		// allocated (decremented) before it is stored.
-		cpu::KERNEL_TRAP_FRAME[0].trap_stack =
-			zalloc(1).add(PAGE_SIZE);
-		id_map_range(
-		             &mut root_pt,
-		             cpu::KERNEL_TRAP_FRAME[0].trap_stack
-		                                      .sub(PAGE_SIZE,)
-		             as usize,
-		             cpu::KERNEL_TRAP_FRAME[0].trap_stack as usize,
-		             EntryBits::ReadWrite.val(),
-		);
+		// cpu::KERNEL_TRAP_FRAME[0].trap_stack =
+		// 	zalloc(1).add(PAGE_SIZE);
+		// id_map_range(
+		//              &mut root_pt,
+		//              cpu::KERNEL_TRAP_FRAME[0].trap_stack
+		//                                       .sub(PAGE_SIZE,)
+		//              as usize,
+		//              cpu::KERNEL_TRAP_FRAME[0].trap_stack as usize,
+		//              EntryBits::ReadWrite.val(),
+		// );
 		// The trap frame itself is stored in the mscratch register.
 		id_map_range(
 		             &mut root_pt,
@@ -287,9 +287,9 @@ pub fn map_kernel() {
 		             EntryBits::ReadWrite.val(),
 		);
 		// print_page_allocations();
-		let p = cpu::KERNEL_TRAP_FRAME[0].trap_stack as usize - 1;
-		let m = virt_to_phys(&root_pt, p).unwrap_or(0);
-		println!("Walk 0x{:x} = 0x{:x}", p, m);
+		// let p = cpu::KERNEL_TRAP_FRAME[0].trap_stack as usize - 1;
+		// let m = virt_to_phys(&root_pt, p).unwrap_or(0);
+		// println!("Walk 0x{:x} = 0x{:x}", p, m);
     }
     
 	// The following shows how we're going to walk to translate a virtual

@@ -1,6 +1,14 @@
 #![no_main]
 #![no_std]
-#![feature(panic_info_message,global_asm,asm,llvm_asm,alloc_error_handler,custom_test_frameworks,alloc_prelude)]
+#![feature(
+    panic_info_message,
+    global_asm,
+    asm,
+    llvm_asm,
+    alloc_error_handler,
+    custom_test_frameworks,
+    alloc_prelude
+)]
 #![test_runner(crate::test_runner)]
 #![reexport_test_harness_main = "test_main"]
 
@@ -48,7 +56,7 @@ extern "C" {
 }
 
 extern "C" {
-    fn switch_to_user(frame: usize, epc: usize, satp: usize) -> !;
+    pub fn switch_to_user(frame: usize) -> !;
 }
 
 // ///////////////////////////////////
@@ -58,25 +66,23 @@ extern "C" {
 extern "C" fn eh_personality() {}
 
 #[panic_handler]
-fn panic(info: &core::panic::PanicInfo) -> !{
+fn panic(info: &core::panic::PanicInfo) -> ! {
     print!("Aborting: ");
-	if let Some(_p) = info.location() {
-		println!(
+    if let Some(_p) = info.location() {
+        println!(
             "line {}, file {}: {}",
             _p.line(),
             _p.file(),
             info.message().unwrap()
-		);
-	}
-    else {
+        );
+    } else {
         println!("no information available.");
     }
     abort();
 }
 
 #[no_mangle]
-extern "C"
-fn abort() -> ! {
+extern "C" fn abort() -> ! {
     loop {
         unsafe {
             asm!("wfi");
@@ -86,14 +92,12 @@ fn abort() -> ! {
 
 // Runs in machine mode
 #[no_mangle]
-extern "C"
-fn kinit() -> ! {
+extern "C" fn kinit() -> ! {
     uart::Uart::new(0x1000_0000).init();
     println!("Welcome to PeetOS");
     page::init();
     kmem::init();
     process::init();
-    println!("Setting up interrupts and PLIC...");
     plic::set_threshold(0);
     // Enable PLIC interrupts
     // VIRTIO = 1 -> 8
@@ -104,86 +108,34 @@ fn kinit() -> ! {
     }
     virtio::probe();
 
-    println!("testing block driver");
-    let buffer = kmem::kmalloc(1024);
-    unsafe { buffer.write_volatile(1) }
-    block::read(3, buffer, 512, 1024);
-    let mut i = 0;
-    loop {
-        if i > 100_000_000 {
-            break;
-        }
-        i += 1;
-    }
-    unsafe {
-		print!("  ");
-		for i in 0..16 {
-			print!("{:02x} ", buffer.add(i).read());
-		}
-		println!();
-		print!("  ");
-		for i in 0..16 {
-			print!("{:02x} ", buffer.add(16+i).read());
-		}
-		println!();
-		print!("  ");
-		for i in 0..16 {
-			print!("{:02x} ", buffer.add(32+i).read());
-		}
-		println!();
-		print!("  ");
-		for i in 0..16 {
-			print!("{:02x} ", buffer.add(48+i).read());
-		}
-		println!();
-		buffer.add(0).write(0xaa);
-		buffer.add(1).write(0xbb);
-		buffer.add(2).write(0x7a);
-    }
-    block::write(3, buffer, 512, 0);
-    kmem::kfree(buffer);
+    console::init();
 
     // let mut sh = shell::Shell::new();
     // sh.shell();
-
-    // Start timer
-    unsafe {
-        let mtimecmp = 0x0200_4000 as *mut u64;
-        let mtime = 0x0200_bff8 as *const u64;
-        // The frequency given by QEMU is 10_000_000 Hz, so this sets
-        // the next interrupt to fire one second from now.
-        mtimecmp.write_volatile(mtime.read_volatile() + 10_000_000);
-    }
+    test::init_processes();
 
     // Schedule first process and switch
-    let (frame, mepc, satp) = scheduler::schedule();
-    unsafe {
-        switch_to_user(frame, mepc, satp);
-    }
+    trap::schedule_scheduler();
+    scheduler::context_switch();
 }
 
 #[no_mangle]
-extern "C"
-fn kinit_hart(hartid: usize) {
-	// All non-0 harts initialize here.
-	unsafe {
-		// We have to store the kernel's table. The tables will be moved
-		// back and forth between the kernel's table and user
-		// applicatons' tables.
-		cpu::mscratch_write(
-            (&mut cpu::KERNEL_TRAP_FRAME[hartid]
-                as *mut cpu::TrapFrame)
-            as usize,
-		);
-		// Copy the same mscratch over to the supervisor version of the
-		// same register.
-		cpu::sscratch_write(cpu::mscratch_read());
-		cpu::KERNEL_TRAP_FRAME[hartid].hartid = hartid;
-		// We can't do the following until zalloc() is locked, but we
-		// don't have locks, yet :( cpu::KERNEL_TRAP_FRAME[hartid].satp
-		// = cpu::KERNEL_TRAP_FRAME[0].satp;
-		// cpu::KERNEL_TRAP_FRAME[hartid].trap_stack = page::zalloc(1);
-	}
+extern "C" fn kinit_hart(hartid: usize) {
+    // All non-0 harts initialize here.
+    unsafe {
+        // We have to store the kernel's table. The tables will be moved
+        // back and forth between the kernel's table and user
+        // applicatons' tables.
+        cpu::mscratch_write((&mut cpu::KERNEL_TRAP_FRAME[hartid] as *mut cpu::TrapFrame) as usize);
+        // Copy the same mscratch over to the supervisor version of the
+        // same register.
+        cpu::sscratch_write(cpu::mscratch_read());
+        cpu::KERNEL_TRAP_FRAME[hartid].hartid = hartid;
+        // We can't do the following until zalloc() is locked, but we
+        // don't have locks, yet :( cpu::KERNEL_TRAP_FRAME[hartid].satp
+        // = cpu::KERNEL_TRAP_FRAME[0].satp;
+        // cpu::KERNEL_TRAP_FRAME[hartid].trap_stack = page::zalloc(1);
+    }
 }
 
 // ///////////////////////////////////
@@ -191,20 +143,25 @@ fn kinit_hart(hartid: usize) {
 // ///////////////////////////////////
 
 pub mod assembly;
-pub mod uart;
-pub mod page;
-pub mod shell;
-pub mod mmu;
-pub mod kmem;
-pub mod trap;
+pub mod block;
+pub mod buffer;
+pub mod console;
 pub mod cpu;
+pub mod fs;
+pub mod kmem;
+pub mod lock;
+pub mod mmu;
+pub mod page;
 pub mod plic;
 pub mod process;
-pub mod syscall;
-pub mod scheduler;
-pub mod virtio;
-pub mod block;
 pub mod random;
+pub mod scheduler;
+pub mod shell;
+pub mod syscall;
+pub mod test;
+pub mod trap;
+pub mod uart;
+pub mod virtio;
 
 // ///////////////////////////////////
 // / TESTS

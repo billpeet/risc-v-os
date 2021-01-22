@@ -1,110 +1,89 @@
-use crate::uart::Uart;
 extern crate alloc;
+use crate::process;
+use crate::syscall;
 use alloc::string::String;
 
 pub struct Shell {
-    uart: Uart,
-    cmd: String,
     running: bool,
 }
 
 impl Shell {
-
     pub fn new() -> Self {
-        Shell {
-            uart: Uart::new(0x1000_0000),
-            cmd: String::new(),
-            running: true,
-        }
+        Shell { running: true }
     }
 
     pub fn shell(&mut self) {
         print!("> ");
+        let mut cmd = String::from("");
         while self.running {
-            if let Some(c) = self.uart.get() {
-                match c {
-                    8 => {
-                        // Backspace
-                        if !self.cmd.is_empty() {
-                            print!("{}{}{}", 8 as char, ' ', 8 as char);
-                            self.cmd.pop();
+            let mut buffer = [0 as u8; 255];
+            let buffer_ptr = buffer.as_mut_ptr();
+            let chars = syscall::sys_read(0, buffer_ptr, 255);
+            if chars > 0 {
+                for i in 0..chars {
+                    match buffer[i] {
+                        0 => {
+                            // Break on null character
+                            break;
                         }
-                    },
-                    10 | 13 => {
-                        // Newline or carriage return
-                        // execute some command here
-                        println!();
-                        if !self.cmd.is_empty() {
-                            self.execute_command();
-                        }
-                        self.cmd = String::new();
-                        print!("> ");
-                    },
-                    0x1b => {
-                        if let Some(next_byte) = self.uart.get() {
-                            if next_byte == 91 {
-                                if let Some(b) = self.uart.get() {
-                                    match b as char {
-                                        'A' => {
-                                            println!("Up arrow");
-                                        },
-                                        'B' => {
-                                            println!("Down arrow");
-                                        },
-                                        'C' => {
-                                            println!("Right arrow");
-                                        },
-                                        'D' => {
-                                            println!("Left arrow");
-                                        },
-                                        _ => {
-                                            println!("Something else");
-                                        }
-                                    }
-                                }
+                        8 => {
+                            // Backspace
+                            if !cmd.is_empty() {
+                                cmd.pop();
                             }
                         }
-                    },
-                    _ => {
-                        print!("{}", c as char);
-                        self.cmd.push(c as char);
+                        10 | 13 => {
+                            // Newline or carriage return
+                            // execute some command here
+                            if !cmd.is_empty() {
+                                self.execute_command(&cmd);
+                                cmd = String::from("");
+                                print!("> ");
+                            }
+                            break;
+                        }
+                        _ => {
+                            cmd.push(buffer[i] as char);
+                        }
                     }
                 }
             }
         }
     }
 
-    fn execute_command(&mut self) {
-        match self.cmd.as_str() {
+    fn execute_command(&mut self, cmd: &str) {
+        match cmd {
             "peanut" => {
                 println!("hoho");
-            },
+            }
             "pagefault" => {
                 println!("triggering page fault:");
                 unsafe {
                     let v = 0xdeadbeef as *mut u64;
                     v.write_volatile(0);
                 }
-                println!("I'm baaack");
-            },
-            "timer" => {
+            }
+            "ps" => {
+                // task manager
                 unsafe {
-                    // Set the next machine timer to fire.
-                    let mtimecmp = 0x0200_4000 as *mut u64;
-                    let mtime = 0x0200_bff8 as *const u64;
-                    // The frequency given by QEMU is 10_000_000 Hz, so this sets
-                    // the next interrupt to fire one second from now.
-                    mtimecmp.write_volatile(mtime.read_volatile() + 10_000_000);
+                    process::PROCESS_LIST_MUTEX.sleep_lock();
+                    if let Some(pl) = process::PROCESS_LIST.take() {
+                        println!("Task Manager");
+                        for p in pl.iter() {
+                            println!("pid {}, state {:?}", p.pid, p.state);
+                        }
+                        process::PROCESS_LIST.replace(pl);
+                    }
+                    process::PROCESS_LIST_MUTEX.unlock();
                 }
-            },
+            }
             "quit" => {
                 println!("quitting shell...");
                 self.running = false;
-            },
+            }
             _ => {
-                println!("Unrecognized command '{}'", self.cmd.as_str());
+                println!("Unrecognized command '{}'", cmd);
             }
         }
     }
-
 }

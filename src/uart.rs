@@ -1,5 +1,6 @@
 use core::fmt::{Error, Write};
 use core::convert::TryInto;
+use crate::console;
 
 pub struct Uart {
     base_address: usize,
@@ -71,5 +72,28 @@ impl Write for Uart {
             self.put(c);
         }
         Ok(())
+    }
+}
+
+pub fn handle_interrupt() {
+    let mut uart = Uart::new(0x1000_0000);
+    if let Some(c) = uart.get() {
+        console::push_stdin(c);
+
+        match c {
+			8 => {
+				// This is a backspace, so we
+				// essentially have to write a space and
+				// backup again:
+				print!("{} {}", 8 as char, 8 as char);
+			},
+			10 | 13 => {
+				// Newline or carriage-return
+				println!();
+			},
+			_ => {
+				print!("{}", c as char);
+			},
+		}
     }
 }

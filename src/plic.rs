@@ -1,4 +1,6 @@
 // Platform Level Interrupt Controller (PLIC)
+use crate::{uart, virtio};
+
 const PLIC_PRIORITY: usize = 0x0c00_0000;
 const PLIC_PENDING: usize = 0x0c00_1000;
 const PLIC_INT_ENABLE: usize = 0x0c00_2000;
@@ -72,28 +74,15 @@ pub fn handle_interrupt() {
         match interrupt {
             1..=8 => {
                 // VIRTIO interrupt
-                println!("virtio interrupt");
-                crate::virtio::handle_interrupt(interrupt);
+                // println!("virtio interrupt");
+                virtio::handle_interrupt(interrupt);
             },
             10 => {
                 // UART interrupt
-                let mut u = crate::uart::Uart::new(0x1000_0000);
-                if let Some(c) = u.get() {
-                    match c {
-                        8 => {
-                            print!("{} {}", 8 as char, 8 as char);
-                        },
-                        10 | 13 => {
-                            println!();
-                        },
-                        _ => {
-                            print!("{}", c as char);
-                        }
-                    }
-                }
+                uart::handle_interrupt();
             },
             _ => {
-                println!("Non-UART external interrupt: {}", interrupt);
+                println!("Unkown external interrupt: {}", interrupt);
             }
         }
         complete(interrupt);

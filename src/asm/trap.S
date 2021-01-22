@@ -15,10 +15,10 @@
     ld      x\i, ((\i)*REG_SIZE)(\basereg)
 .endm
 .macro save_fp i, basereg=t6
-    fsd     f\i, ((NUM_GP_REGS+(\i)*REG_SIZE)(\basereg)
+    fsd     f\i, ((NUM_GP_REGS+(\i))*REG_SIZE)(\basereg)
 .endm
 .macro load_fp i, basereg=t6
-    fld     f\i, ((NUM_GP_REGS+(\i)*REG_SIZE)(\basereg)
+    fld     f\i, ((NUM_GP_REGS+(\i))*REG_SIZE)(\basereg)
 .endm
 
 .section .text
@@ -69,14 +69,21 @@ m_trap_vector:
 .global switch_to_user
 switch_to_user:
     # a0 - Frame address
-    # a1 - Program counter
-    # a2 - SATP register
     csrw    mscratch, a0
 
-    # User mode = 00 (bits [12:11])
+    # program counter
+    ld a1, 520(a0)
+    # satp
+    ld a2, 512(a0)
+    # processor mode
+    ld a3, 552(a0)
+
     # bit 7 for machine interrupt enable (MPIE)
     # bit 5 for supervisor interrupt enable (SPIE)
-    li      t0, (1 << 7) | (1 << 5) | (0b00 << 11)
+    li      t0, (1 << 7) | (1 << 5) | 1 << 13
+    # combine enable bits with mode bits
+    slli    a3, a3, 11
+    or      t0, t0, a3
     csrw    mstatus, t0
     csrw    mepc, a1
     csrw    satp, a2
@@ -85,9 +92,15 @@ switch_to_user:
     csrw    mie, t1
     la      t2, m_trap_vector   # write trap vector again
     csrw    mtvec, t2
-    sfence.vma                  # force flush the TLB
+    # sfence.vma                  # force flush the TLB
     mv      t6, a0
     # reload all registers again so we can start running the process
+    .set    i, 0
+    .rept   32
+        load_fp %i
+        .set i, i+1
+    .endr
+
     .set    i, 1
     .rept   31
         load_gp %i, t6
@@ -98,5 +111,13 @@ switch_to_user:
 
 .global make_syscall
 make_syscall:
+    # using libgloss convention - a7 is system call number, a0-a5 are args
+    mv  a7, a0
+    mv  a0, a1
+    mv  a1, a2
+    mv  a2, a3
+    mv  a3, a4
+    mv  a4, a5
+    mv  a5, a6
     ecall
     ret
